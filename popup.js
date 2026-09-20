@@ -5,6 +5,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const fadeToggle = document.getElementById('fadeToggle');
     const fadeThreshold = document.getElementById('fadeThreshold');
     const fadeUnknown = document.getElementById('fadeUnknown');
+    const showYoeBadge = document.getElementById('showYoeBadge');
+    const fadeYoeEnabled = document.getElementById('fadeYoeEnabled');
+    const maxYoeThreshold = document.getElementById('maxYoeThreshold');
     const showSalaryIcon = document.getElementById('showSalaryIcon');
 
     // Load state
@@ -13,12 +16,18 @@ document.addEventListener('DOMContentLoaded', () => {
         fadeEnabled: true,
         fadeThreshold: 2000,
         fadeUnknown: false,
+        showYoeBadge: true,
+        fadeYoeEnabled: false,
+        maxYoeThreshold: 3,
         showSalaryIcon: true
     }, (items) => {
         masterToggle.checked = items.isEnabled !== false;
         fadeToggle.checked = items.fadeEnabled !== false;
         fadeThreshold.value = items.fadeThreshold;
         fadeUnknown.checked = items.fadeUnknown === true;
+        showYoeBadge.checked = items.showYoeBadge !== false;
+        fadeYoeEnabled.checked = items.fadeYoeEnabled === true;
+        maxYoeThreshold.value = items.maxYoeThreshold ?? 3;
         showSalaryIcon.checked = items.showSalaryIcon !== false;
     });
 
@@ -31,6 +40,9 @@ document.addEventListener('DOMContentLoaded', () => {
             fadeEnabled: fadeToggle.checked,
             fadeThreshold: parseInt(fadeThreshold.value, 10) || 0,
             fadeUnknown: fadeUnknown.checked,
+            showYoeBadge: showYoeBadge.checked,
+            fadeYoeEnabled: fadeYoeEnabled.checked,
+            maxYoeThreshold: parseInt(maxYoeThreshold.value, 10) ?? 3,
             showSalaryIcon: showSalaryIcon.checked
         });
 
@@ -50,5 +62,8 @@ document.addEventListener('DOMContentLoaded', () => {
     fadeToggle.addEventListener('change', saveState);
     fadeThreshold.addEventListener('input', saveState);
     fadeUnknown.addEventListener('change', saveState);
+    showYoeBadge.addEventListener('change', saveState);
+    fadeYoeEnabled.addEventListener('change', saveState);
+    maxYoeThreshold.addEventListener('input', saveState);
     showSalaryIcon.addEventListener('change', saveState);
 });

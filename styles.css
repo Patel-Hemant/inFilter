@@ -5,3 +5,20 @@
     margin-left: 6px;
     display: inline-block;
 }
+
+.yoe-badge {
+    color: #0a66c2; /* LinkedIn Blue */
+    font-weight: 600;
+    margin-left: 2px;
+}
+
+.salary-icon {
+    margin-left: 4px;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+    display: inline-block;
+}
+
+.salary-icon:hover {
+    transform: scale(1.25);
+}

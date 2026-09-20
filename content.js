@@ -1,18 +1,35 @@
-// content.js
+// content.js - inFilter Chrome Extension
 
 let extensionEnabled = true;
 let fadeEnabled = true;
 let fadeThreshold = 2000;
 let fadeUnknown = false;
+let showYoeBadge = true;
+let fadeYoeEnabled = false;
+let maxYoeThreshold = 3;
 let showSalaryIcon = true;
 
-chrome.storage.local.get(['isEnabled', 'fadeEnabled', 'fadeThreshold', 'fadeUnknown', 'showSalaryIcon'], (result) => {
+chrome.storage.local.get([
+    'isEnabled',
+    'fadeEnabled',
+    'fadeThreshold',
+    'fadeUnknown',
+    'showYoeBadge',
+    'fadeYoeEnabled',
+    'maxYoeThreshold',
+    'showSalaryIcon'
+], (result) => {
     extensionEnabled = result.isEnabled !== false;
     fadeEnabled = result.fadeEnabled !== false;
     if (result.fadeThreshold !== undefined) fadeThreshold = result.fadeThreshold;
     fadeUnknown = result.fadeUnknown === true;
+    showYoeBadge = result.showYoeBadge !== false;
+    fadeYoeEnabled = result.fadeYoeEnabled === true;
+    if (result.maxYoeThreshold !== undefined) maxYoeThreshold = result.maxYoeThreshold;
     showSalaryIcon = result.showSalaryIcon !== false;
     updateBadgeVisibility();
+    updateYoeBadgesVisibility();
+    updateFades();
     updateSalaryIcons();
 });
 
@@ -21,6 +38,12 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
         if (changes.fadeEnabled) fadeEnabled = changes.fadeEnabled.newValue;
         if (changes.fadeThreshold) fadeThreshold = changes.fadeThreshold.newValue;
         if (changes.fadeUnknown) fadeUnknown = changes.fadeUnknown.newValue;
+        if (changes.showYoeBadge) {
+            showYoeBadge = changes.showYoeBadge.newValue;
+            updateYoeBadgesVisibility();
+        }
+        if (changes.fadeYoeEnabled) fadeYoeEnabled = changes.fadeYoeEnabled.newValue;
+        if (changes.maxYoeThreshold) maxYoeThreshold = changes.maxYoeThreshold.newValue;
         if (changes.showSalaryIcon) {
             showSalaryIcon = changes.showSalaryIcon.newValue;
             updateSalaryIcons();
@@ -33,14 +56,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "toggleState") {
         extensionEnabled = request.isEnabled;
         updateBadgeVisibility();
+        updateYoeBadgesVisibility();
         updateFades();
+        updateSalaryIcons();
     }
 });
 
 function updateBadgeVisibility() {
     const badges = document.querySelectorAll('.employee-count-badge');
     badges.forEach(badge => {
-        badge.style.display = extensionEnabled ? 'inline' : 'none';
+        badge.style.display = extensionEnabled ? 'inline-block' : 'none';
+    });
+}
+
+function updateYoeBadgesVisibility() {
+    const yoeSpans = document.querySelectorAll('.yoe-badge');
+    yoeSpans.forEach(span => {
+        span.style.display = (extensionEnabled && showYoeBadge) ? 'inline' : 'none';
     });
 }
 
@@ -53,13 +85,22 @@ function updateFades() {
         if (extensionEnabled) {
             let shouldFade = false;
             
-            if (badge.innerText.includes('?')) {
-                shouldFade = fadeUnknown;
+            // 1. Check Unknown Employee Count
+            if (badge.dataset.employeeCount === "N/A" || (badge.dataset.employeeCount && badge.dataset.employeeCount.includes('?'))) {
+                if (fadeUnknown) shouldFade = true;
             } else if (fadeEnabled && fadeThreshold > 0) {
-                const match = badge.innerText.match(/\d[0-9,]*/);
-                if (match) {
-                    const count = parseInt(match[0].replace(/,/g, ''), 10);
-                    if (count < fadeThreshold) shouldFade = true;
+                // 2. Check Small Company Employee Threshold
+                const count = parseInt(badge.dataset.employeeCountRaw || '0', 10);
+                if (count > 0 && count < fadeThreshold) {
+                    shouldFade = true;
+                }
+            }
+            
+            // 3. Check Years of Experience (YOE) Threshold
+            if (fadeYoeEnabled && maxYoeThreshold !== undefined && maxYoeThreshold !== null) {
+                const requiredMinYoe = parseInt(badge.dataset.yoeMin || '-1', 10);
+                if (requiredMinYoe > -1 && requiredMinYoe > maxYoeThreshold) {
+                    shouldFade = true;
                 }
             }
             
@@ -79,7 +120,7 @@ function updateSalaryIcons() {
     const badges = document.querySelectorAll('.employee-count-badge');
     badges.forEach(badge => {
         const existingIcon = badge.querySelector('.salary-icon');
-        if (showSalaryIcon) {
+        if (showSalaryIcon && extensionEnabled) {
             if (!existingIcon) {
                 const companyName = badge.dataset.companyName || "";
                 const positionName = badge.dataset.positionName || "";
@@ -87,8 +128,7 @@ function updateSalaryIcons() {
                 const moneySpan = document.createElement('span');
                 moneySpan.className = 'salary-icon';
                 moneySpan.innerText = ' 💰';
-                moneySpan.style.cursor = 'pointer';
-                moneySpan.title = "Search Salary";
+                moneySpan.title = `Search ${companyName} ${positionName} Salary on LeetCode`;
                 moneySpan.onclick = (e) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -105,7 +145,36 @@ function updateSalaryIcons() {
     });
 }
 
+// ----------------------------------------------------
+// CACHES & RATE-LIMITED QUEUE FOR COMPANY COUNTS
+// ----------------------------------------------------
 const companyCountCache = {};
+const jobYoeCache = {};
+
+let isFetching = false;
+const fetchQueue = [];
+
+function processQueue() {
+    if (isFetching || fetchQueue.length === 0) return;
+    
+    isFetching = true;
+    const task = fetchQueue.shift();
+    
+    task()
+        .finally(() => {
+            setTimeout(() => {
+                isFetching = false;
+                processQueue();
+            }, 300); // 300ms smooth delay
+        });
+}
+
+function queueFetch(companyUrl, companyName) {
+    return new Promise((resolve) => {
+        fetchQueue.push(() => fetchCompanyCount(companyUrl, companyName).then(resolve).catch(() => resolve("N/A")));
+        processQueue();
+    });
+}
 
 function getCsrfToken() {
     try {
@@ -116,12 +185,111 @@ function getCsrfToken() {
     }
 }
 
+// ----------------------------------------------------
+// YEARS OF EXPERIENCE (YOE) EXTRACTION
+// ----------------------------------------------------
+const wordToNum = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12, "fifteen": 15
+};
+
+const numPattern = "\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen";
+
+function parseNumberWord(val) {
+    if (!val) return null;
+    val = val.toLowerCase().trim();
+    if (wordToNum[val] !== undefined) return wordToNum[val];
+    const n = parseInt(val, 10);
+    return isNaN(n) ? null : n;
+}
+
+function extractYOE(desc) {
+    if (!desc) return null;
+    const cleanText = desc.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ");
+
+    const patterns = [
+        // "3-5 years of software development experience", "5+ years of experience", "five or more years of experience"
+        new RegExp(`(?:minimum(?:\\s+of)?|at\\s+least)?\\s*(${numPattern})\\s*(?:(?:-|to)\\s*(${numPattern}))?\\s*(?:or\\s+more|\\+)?\\s*(?:years?|yrs?)(?:\\s+of)?(?:\\s+[a-zA-Z/-]+){0,4}\\s*(?:experience|exp)\\b`, "gi"),
+        // "experience: 5+ years" or "experience of 3-5 years"
+        new RegExp(`(?:experience|exp)\\s*(?:of|:)?\\s*(${numPattern})\\s*(?:(?:-|to)\\s*(${numPattern})|\\+)?\\s*(?:years?|yrs?)\\b`, "gi"),
+        // "5+ years in/with/as a software engineer"
+        new RegExp(`(${numPattern})\\s*\\+\\s*(?:years?|yrs?)\\s*(?:in|with|working|building|developing|leading|as\\s+a)\\b`, "gi")
+    ];
+
+    const found = [];
+    for (const pattern of patterns) {
+        let match;
+        while ((match = pattern.exec(cleanText)) !== null) {
+            const minYears = parseNumberWord(match[1]);
+            if (minYears !== null && minYears >= 0 && minYears <= 25) {
+                const maxYears = match[2] ? parseNumberWord(match[2]) : null;
+                const display = maxYears ? `${minYears}-${maxYears} yrs` : `${minYears}+ yrs`;
+                found.push({
+                    text: match[0].trim(),
+                    min: minYears,
+                    max: maxYears,
+                    display: display
+                });
+            }
+        }
+    }
+    
+    if (found.length === 0) return null;
+
+    // Prioritize largest general experience requirement
+    found.sort((a, b) => b.min - a.min);
+    return found[0];
+}
+
+function fetchJobYOE(jobId) {
+    if (!jobId) return Promise.resolve(null);
+    if (jobYoeCache[jobId]) return Promise.resolve(jobYoeCache[jobId]);
+
+    // 1. Check if the active right pane currently shows this job's description
+    try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const currentJobId = urlParams.get('currentJobId') || window.location.pathname.match(/\/jobs\/view\/(\d+)/)?.[1];
+        if (currentJobId === jobId) {
+            const descEl = document.querySelector('[data-testid="expandable-text-box"], .jobs-description__content, #job-details, .jobs-box__html-content');
+            if (descEl && descEl.innerText) {
+                const yoe = extractYOE(descEl.innerText);
+                if (yoe) {
+                    jobYoeCache[jobId] = yoe;
+                    return Promise.resolve(yoe);
+                }
+            }
+        }
+    } catch (e) {}
+
+    // 2. Delegate to background script (Bypasses page CORS completely)
+    return new Promise((resolve) => {
+        try {
+            chrome.runtime.sendMessage({ action: "fetchJobYOE", jobId: jobId }, (response) => {
+                if (chrome.runtime.lastError || !response || !response.success || !response.yoe) {
+                    jobYoeCache[jobId] = { display: null, min: null, max: null };
+                    resolve(jobYoeCache[jobId]);
+                } else {
+                    jobYoeCache[jobId] = response.yoe;
+                    resolve(response.yoe);
+                }
+            });
+        } catch (e) {
+            jobYoeCache[jobId] = { display: null, min: null, max: null };
+            resolve(jobYoeCache[jobId]);
+        }
+    });
+}
+
+// ----------------------------------------------------
+// COMPANY EMPLOYEE COUNT EXTRACTION
+// ----------------------------------------------------
 async function fetchCompanyCount(companyUrl, companyName) {
     try {
         const csrfToken = getCsrfToken();
         const formattedName = companyUrl.split('/company/')[1]?.replace(/\//g, '');
         
-        // STRATEGY 1: Fetch via LinkedIn Voyager API (Extremely accurate and fast, no HTML parsing)
+        // STRATEGY 1: Fetch via LinkedIn Voyager API (Direct & Fast)
         if (formattedName && csrfToken) {
             try {
                 const apiUrl = `https://www.linkedin.com/voyager/api/organization/companies?q=universalName&universalName=${formattedName}`;
@@ -132,25 +300,22 @@ async function fetchCompanyCount(companyUrl, companyName) {
                     }
                 });
                 
-                if (apiResponse.ok) {
+                if (apiResponse && apiResponse.ok) {
                     const apiData = await apiResponse.json();
                     const strData = JSON.stringify(apiData);
                     const staffCountMatch = strData.match(/"staffCount":(\d+)/);
                     
                     if (staffCountMatch && staffCountMatch[1]) {
-                        const count = parseInt(staffCountMatch[1]);
+                        const count = parseInt(staffCountMatch[1], 10);
                         if (!(count > 25000 && count < 27000 && !companyName.toLowerCase().includes("linkedin"))) {
-                            console.log(`[LinkedIn Employee Count] Voyager API success for ${companyName}`);
                             return `${count.toLocaleString()} employees`;
                         }
                     }
                 }
-            } catch (apiErr) {
-                // Ignore and fallback to HTML
-            }
+            } catch (apiErr) {}
         }
 
-        // STRATEGY 2: Fallback to fetching the HTML page directly
+        // STRATEGY 2: Fallback to HTML
         const response = await fetch(companyUrl, {
             credentials: 'include',
             headers: {
@@ -161,9 +326,7 @@ async function fetchCompanyCount(companyUrl, companyName) {
             }
         });
         
-        if (!response.ok) {
-            return "N/A";
-        }
+        if (!response || !response.ok) return "N/A";
 
         const htmlText = await response.text();
         
@@ -173,67 +336,108 @@ async function fetchCompanyCount(companyUrl, companyName) {
         
         const textMatch = htmlText.match(/([0-9][0-9,Kk\+\-]*\s+employees)/i);
         if (textMatch && textMatch[0]) {
-            if (!(textMatch[0].includes("26,000") && !companyName.toLowerCase().includes("linkedin"))) {
-                return textMatch[0];
-            }
+            if (!(textMatch[0].includes("26,000") && !companyName.toLowerCase().includes("linkedin"))) return textMatch[0];
         }
 
         const staffCountMatch = htmlText.match(/"staffCount"\s*:\s*(\d+)/);
         if (staffCountMatch && staffCountMatch[1]) {
-            const count = parseInt(staffCountMatch[1]);
-            if (!(count > 25000 && count < 27000 && !companyName.toLowerCase().includes("linkedin"))) {
-                return `${count.toLocaleString()} employees`;
-            }
+            const count = parseInt(staffCountMatch[1], 10);
+            if (!(count > 25000 && count < 27000 && !companyName.toLowerCase().includes("linkedin"))) return `${count.toLocaleString()} employees`;
         }
 
         const rangeMatch = htmlText.match(/"companySize"\s*:\s*\{[^\}]*"start"\s*:\s*(\d+)(?:[^\}]*"end"\s*:\s*(\d+))?/);
         if (rangeMatch && rangeMatch[1]) {
-            const start = parseInt(rangeMatch[1]);
+            const start = parseInt(rangeMatch[1], 10);
             if (start > 0) {
-                const end = rangeMatch[2] ? `-${parseInt(rangeMatch[2]).toLocaleString()}` : "+";
+                const end = rangeMatch[2] ? `-${parseInt(rangeMatch[2], 10).toLocaleString()}` : "+";
                 return `${start.toLocaleString()}${end} employees`;
             }
         }
+        return "N/A";
+    } catch (e) { return "N/A"; }
+}
 
-        // If it failed all strategies, log a snippet of the HTML so we know what we received!
-        return "N/A";
-        return "N/A";
-
-    } catch (e) {
-        return "N/A";
+// ----------------------------------------------------
+// JOB CARD ID EXTRACTION
+// ----------------------------------------------------
+function extractJobId(jobCardElement) {
+    if (!jobCardElement) return null;
+    
+    // 1. data-job-id attribute
+    let id = jobCardElement.getAttribute('data-job-id');
+    if (id && /^\d+$/.test(id)) return id;
+    
+    // 2. data-occludable-job-id attribute
+    id = jobCardElement.getAttribute('data-occludable-job-id');
+    if (id && /^\d+$/.test(id)) return id;
+    
+    // 3. componentkey attribute like "job-card-component-ref-4452421935"
+    const compKey = jobCardElement.getAttribute('componentkey') || 
+                    jobCardElement.querySelector('[componentkey*="job-card-component-ref-"]')?.getAttribute('componentkey');
+    if (compKey) {
+        const m = compKey.match(/(\d{7,12})/);
+        if (m) return m[1];
     }
-}
-
-let isFetching = false;
-const fetchQueue = [];
-
-function processQueue() {
-    if (isFetching || fetchQueue.length === 0) return;
     
-    isFetching = true;
-    const { companyUrl, companyName, resolve } = fetchQueue.shift();
+    // 4. Job link inside card (e.g. href="/jobs/view/4452421935/...")
+    const jobLink = jobCardElement.querySelector('a[href*="/jobs/view/"]');
+    if (jobLink && jobLink.href) {
+        const m = jobLink.href.match(/\/jobs\/view\/(\d+)/);
+        if (m) return m[1];
+    }
     
-    fetchCompanyCount(companyUrl, companyName)
-        .then(count => {
-            resolve(count);
-        })
-        .finally(() => {
-            setTimeout(() => {
-                isFetching = false;
-                processQueue();
-            }, 1000); 
-        });
+    // 5. Link with currentJobId (e.g. href="...?currentJobId=4452421935...")
+    const currentJobLink = jobCardElement.querySelector('a[href*="currentJobId="]');
+    if (currentJobLink && currentJobLink.href) {
+        const m = currentJobLink.href.match(/currentJobId=(\d+)/);
+        if (m) return m[1];
+    }
+
+    return null;
 }
 
-function queueFetch(companyUrl, companyName) {
-    return new Promise((resolve) => {
-        fetchQueue.push({ companyUrl, companyName, resolve });
-        processQueue();
-    });
+// ----------------------------------------------------
+// PROGRESSIVE BADGE RENDERING
+// ----------------------------------------------------
+function renderBadge(badge) {
+    if (!document.body.contains(badge)) return;
+
+    const employeeCount = badge.dataset.employeeCount;
+    const yoeDisplay = badge.dataset.yoeDisplay;
+
+    // If company count is still loading
+    if (!employeeCount) {
+        badge.innerText = ` • Loading...`;
+        badge.style.color = '#999999';
+        return;
+    }
+
+    let countText = "";
+    if (employeeCount === "N/A") {
+        countText = " • ?";
+        badge.style.color = "#999999";
+    } else {
+        countText = ` • 👥 ${employeeCount}`;
+        badge.style.color = "#057642";
+    }
+
+    let yoeHtml = "";
+    if (yoeDisplay) {
+        const displayStyle = (extensionEnabled && showYoeBadge) ? 'inline' : 'none';
+        yoeHtml = `<span class="yoe-badge" style="display: ${displayStyle};"> • 🎓 ${yoeDisplay}</span>`;
+    }
+
+    badge.innerHTML = `${countText}${yoeHtml}`;
+
+    updateFades();
+    updateSalaryIcons();
 }
 
+// ----------------------------------------------------
+// JOB CARD PROCESSING
+// ----------------------------------------------------
 async function processJobCard(jobCardElement) {
-    if (!jobCardElement || jobCardElement.dataset.employeeCountProcessedV6 === "true") return;
+    if (!jobCardElement || jobCardElement.dataset.infilterProcessed === "true") return;
     
     try {
         let companyDiv = null;
@@ -260,7 +464,7 @@ async function processJobCard(jobCardElement) {
         
         if (!companyName || !companyDiv) return;
         
-        jobCardElement.dataset.employeeCountProcessedV6 = "true";
+        jobCardElement.dataset.infilterProcessed = "true";
 
         const companyLink = jobCardElement.querySelector('a[href*="/company/"]');
         if (companyLink) {
@@ -278,10 +482,37 @@ async function processJobCard(jobCardElement) {
             companyUrl = `https://www.linkedin.com/company/${formattedName}/`;
         }
 
+        // Extract Position Name for salary search
+        let positionName = "";
+        if (titleContainer) {
+            const titleSpan = titleContainer.querySelector('span[aria-hidden="true"]') || titleContainer.querySelector('span');
+            if (titleSpan) {
+                positionName = titleSpan.innerText || titleSpan.textContent;
+            } else {
+                positionName = titleContainer.innerText || titleContainer.textContent;
+            }
+        }
+        if (!positionName) {
+            const fallbackTitle = jobCardElement.querySelector('.job-card-list__title, .artdeco-entity-lockup__title, .job-card-container__title, .job-card-list__title--emphasized');
+            if (fallbackTitle) {
+                positionName = fallbackTitle.innerText || fallbackTitle.textContent;
+            }
+        }
+        if (positionName) {
+            positionName = positionName.replace(/\(.*\)/g, '').replace(/\n/g, '').trim();
+        }
+
+        // Extract Job ID for YOE extraction
+        const jobId = extractJobId(jobCardElement);
+
+        // Initial Loading Badge
         const badge = document.createElement('span');
         badge.className = 'employee-count-badge';
         badge.innerText = ` • Loading...`;
         badge.style.color = '#999999';
+        badge.dataset.companyName = companyName;
+        badge.dataset.positionName = positionName;
+        if (jobId) badge.dataset.jobId = jobId;
         
         const pTag = companyDiv.querySelector('p');
         if (pTag) {
@@ -290,54 +521,59 @@ async function processJobCard(jobCardElement) {
             companyDiv.appendChild(badge);
         }
 
-        const cacheKey = companyUrl;
-        if (!companyCountCache[cacheKey]) {
-            companyCountCache[cacheKey] = queueFetch(companyUrl, companyName);
-        }
+        // Step 1: Start Company Count Fetch (Instant UI update when ready)
+        const countTask = companyCountCache[companyUrl] || (companyCountCache[companyUrl] = queueFetch(companyUrl, companyName));
+        countTask.then(employeeCount => {
+            badge.dataset.employeeCount = employeeCount || "N/A";
+            let rawCount = 0;
+            if (employeeCount && employeeCount !== "N/A") {
+                const m = employeeCount.match(/\d[0-9,]*/);
+                if (m) rawCount = parseInt(m[0].replace(/,/g, ''), 10);
+            }
+            badge.dataset.employeeCountRaw = rawCount.toString();
+            renderBadge(badge);
+        });
 
-        const employeeCount = await companyCountCache[cacheKey];
-        
-        if (document.body.contains(badge)) {
-            if (employeeCount === "N/A") {
-                badge.innerText = ` • ?`;
-                badge.style.color = "#999999"; 
-            } else {
-                badge.innerText = ` • 👥 ${employeeCount}`;
-                badge.style.color = "#057642"; 
-            }
-            
-            // Extract position name for the salary search
-            let positionName = "";
-            const titleContainer = jobCardElement.querySelector('[data-display-contents="true"]');
-            if (titleContainer) {
-                const titleSpan = titleContainer.querySelector('span[aria-hidden="true"]') || titleContainer.querySelector('span');
-                if (titleSpan) {
-                    // Remove nested SVGs/hidden text and trim
-                    positionName = titleSpan.innerText || titleSpan.textContent;
-                } else {
-                    positionName = titleContainer.innerText || titleContainer.textContent;
+        // Step 2: Start Job YOE Fetch via background script / DOM
+        if (jobId) {
+            fetchJobYOE(jobId).then(yoeData => {
+                if (yoeData && yoeData.display) {
+                    badge.dataset.yoeDisplay = yoeData.display;
+                    badge.dataset.yoeMin = (yoeData.min !== null && yoeData.min !== undefined) ? yoeData.min.toString() : "-1";
                 }
-            }
-            if (!positionName) {
-                const fallbackTitle = jobCardElement.querySelector('.job-card-list__title, .artdeco-entity-lockup__title, .job-card-container__title, .job-card-list__title--emphasized');
-                if (fallbackTitle) {
-                    positionName = fallbackTitle.innerText || fallbackTitle.textContent;
-                }
-            }
-            
-            if (positionName) {
-                positionName = positionName.replace(/\(.*\)/g, '').replace(/\n/g, '').trim();
-            }
-            
-            badge.dataset.companyName = companyName;
-            badge.dataset.positionName = positionName;
-            
-            updateFades();
-            updateSalaryIcons();
+                renderBadge(badge);
+            });
         }
     } catch (error) {
         // Silently fail
     }
+}
+
+// ----------------------------------------------------
+// ACTIVE DETAILS PANE OBSERVER (Instant live YOE sync on click)
+// ----------------------------------------------------
+function inspectActiveJobDetails() {
+    try {
+        const descEl = document.querySelector('[data-testid="expandable-text-box"], .jobs-description__content, #job-details, .jobs-box__html-content');
+        if (!descEl || !descEl.innerText) return;
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const currentJobId = urlParams.get('currentJobId') || window.location.pathname.match(/\/jobs\/view\/(\d+)/)?.[1];
+        if (!currentJobId) return;
+
+        const yoe = extractYOE(descEl.innerText);
+        if (yoe) {
+            jobYoeCache[currentJobId] = yoe;
+            
+            // Find corresponding badge in the left list and update it instantly!
+            const targetBadge = document.querySelector(`.employee-count-badge[data-job-id="${currentJobId}"]`);
+            if (targetBadge && targetBadge.dataset.yoeDisplay !== yoe.display) {
+                targetBadge.dataset.yoeDisplay = yoe.display;
+                targetBadge.dataset.yoeMin = (yoe.min !== null && yoe.min !== undefined) ? yoe.min.toString() : "-1";
+                renderBadge(targetBadge);
+            }
+        }
+    } catch (e) {}
 }
 
 function processJobCards() {
@@ -346,6 +582,15 @@ function processJobCards() {
     jobCards.forEach(card => {
         processJobCard(card);
     });
+    inspectActiveJobDetails();
 }
 
-setInterval(processJobCards, 2000);
+setInterval(processJobCards, 1500);
+
+// Listen for clicks on job cards to immediately check right pane details
+document.addEventListener('click', (e) => {
+    if (e.target.closest('.job-card-container, .jobs-search-results__list-item, [componentkey^="job-card-component"]')) {
+        setTimeout(inspectActiveJobDetails, 400);
+        setTimeout(inspectActiveJobDetails, 1000);
+    }
+});

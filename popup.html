@@ -4,28 +4,29 @@
     <meta charset="UTF-8">
     <title>inFilter</title>
     <style>
-        body { font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; padding: 15px; width: 280px; color: #333; margin: 0; }
-        h3 { margin-top: 0; margin-bottom: 15px; font-size: 16px; color: #0a66c2; text-align: center; }
-        .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; }
-        .row label { font-weight: bold; font-size: 14px; }
+        body { font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; padding: 15px; width: 290px; color: #333; margin: 0; }
+        h3 { margin-top: 0; margin-bottom: 12px; font-size: 16px; color: #0a66c2; text-align: center; }
+        .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+        .row label { font-weight: bold; font-size: 13px; }
         
         /* Toggle Switch CSS */
-        .switch { position: relative; display: inline-block; width: 40px; height: 22px; }
+        .switch { position: relative; display: inline-block; width: 38px; height: 20px; }
         .switch input { opacity: 0; width: 0; height: 0; }
-        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 22px; }
-        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .3s; border-radius: 20px; }
+        .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
         input:checked + .slider { background-color: #057642; }
         input:checked + .slider:before { transform: translateX(18px); }
 
-        hr { border: 0; border-top: 1px solid #eee; margin: 15px 0; }
+        hr { border: 0; border-top: 1px solid #eee; margin: 12px 0; }
         
-        .fade-section { background: #f9f9f9; padding: 10px; border-radius: 6px; border: 1px solid #eaeaea; }
-        .fade-section input[type="number"] { width: 80px; padding: 5px; border: 1px solid #ccc; border-radius: 4px; text-align: center; font-weight: bold; font-size: 14px; }
-        .help-text { font-size: 11px; color: #666; margin-top: 8px; line-height: 1.4; display: block; }
+        .section-card { background: #f9f9f9; padding: 10px; border-radius: 6px; border: 1px solid #eaeaea; margin-bottom: 10px; }
+        .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #888; font-weight: 700; margin-bottom: 8px; display: block; }
+        .section-card input[type="number"] { width: 75px; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; text-align: center; font-weight: bold; font-size: 13px; }
+        .help-text { font-size: 11px; color: #666; margin-top: 6px; line-height: 1.35; display: block; }
     </style>
 </head>
 <body>
-    <h3>inFilter</h3>
+    <h3>inFilter 💼</h3>
     
     <div class="row">
         <label for="masterToggle">Enable Extension</label>
@@ -35,36 +36,61 @@
         </label>
     </div>
 
-    <hr>
-
-    <div class="fade-section">
-        <div class="row" style="margin-bottom: 10px;">
-            <label for="fadeToggle">Fade Small Companies</label>
+    <!-- Company Scale Section -->
+    <div class="section-card">
+        <span class="section-title">🏢 Company Size Filter</span>
+        <div class="row" style="margin-bottom: 8px;">
+            <label for="fadeToggle" style="font-weight: normal; font-size: 13px;">Fade Small Companies</label>
             <label class="switch">
                 <input type="checkbox" id="fadeToggle">
                 <span class="slider"></span>
             </label>
         </div>
         <div class="row" style="margin-bottom: 0;">
-            <label for="fadeThreshold" style="font-weight: normal; font-size: 13px;">Minimum count:</label>
+            <label for="fadeThreshold" style="font-weight: normal; font-size: 12px; color: #555;">Min Employees:</label>
             <input type="number" id="fadeThreshold" placeholder="2000" min="0" step="100">
         </div>
-        <span class="help-text">Job cards for companies under this threshold will be greyed out automatically.</span>
         
-        <hr style="margin: 15px 0; border-top: 1px solid #eaeaea;">
+        <hr style="margin: 8px 0; border-top: 1px solid #eaeaea;">
         
-        <div class="row" style="margin-bottom: 0px;">
-            <label for="fadeUnknown">Fade Unknown Count (?)</label>
+        <div class="row" style="margin-bottom: 0;">
+            <label for="fadeUnknown" style="font-weight: normal; font-size: 13px;">Fade Unknown Count (?)</label>
             <label class="switch">
                 <input type="checkbox" id="fadeUnknown">
                 <span class="slider"></span>
             </label>
         </div>
-        
-        <hr style="margin: 15px 0; border-top: 1px solid #eaeaea;">
-        
-        <div class="row" style="margin-bottom: 0px;">
-            <label for="showSalaryIcon">Show Salary Search (💰)</label>
+    </div>
+
+    <!-- Experience / YOE Section -->
+    <div class="section-card">
+        <span class="section-title">🎓 Experience Filter (YOE)</span>
+        <div class="row" style="margin-bottom: 8px;">
+            <label for="showYoeBadge" style="font-weight: normal; font-size: 13px;">Show Experience (🎓)</label>
+            <label class="switch">
+                <input type="checkbox" id="showYoeBadge">
+                <span class="slider"></span>
+            </label>
+        </div>
+        <div class="row" style="margin-bottom: 8px;">
+            <label for="fadeYoeEnabled" style="font-weight: normal; font-size: 13px;">Fade High YOE Jobs</label>
+            <label class="switch">
+                <input type="checkbox" id="fadeYoeEnabled">
+                <span class="slider"></span>
+            </label>
+        </div>
+        <div class="row" style="margin-bottom: 0;">
+            <label for="maxYoeThreshold" style="font-weight: normal; font-size: 12px; color: #555;">My Max YOE (Years):</label>
+            <input type="number" id="maxYoeThreshold" placeholder="3" min="0" max="30" step="1">
+        </div>
+        <span class="help-text">Fades jobs requiring more experience than you have (e.g. 5+ yrs if you have 3).</span>
+    </div>
+
+    <!-- Salary Intel Section -->
+    <div class="section-card" style="margin-bottom: 0;">
+        <span class="section-title">💰 Salary Intel</span>
+        <div class="row" style="margin-bottom: 0;">
+            <label for="showSalaryIcon" style="font-weight: normal; font-size: 13px;">Leetcode Search (💰)</label>
             <label class="switch">
                 <input type="checkbox" id="showSalaryIcon">
                 <span class="slider"></span>
